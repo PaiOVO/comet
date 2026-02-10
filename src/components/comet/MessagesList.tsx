@@ -1,5 +1,5 @@
 import { forwardRef, memo } from 'react'
-import type { ListRange, ScrollerProps, VirtuosoHandle } from 'react-virtuoso'
+import type { ScrollerProps, VirtuosoHandle } from 'react-virtuoso'
 import { Virtuoso } from 'react-virtuoso'
 
 import type { EmojiInfoMap } from '@/hooks/usePrivateMessages'
@@ -23,8 +23,6 @@ export interface MessagesListProps {
   userInfo: CheckLoginResult | null
   onRecall?: (msgSeqno: number, msgKeyStr: string) => Promise<{ success: boolean; error?: string }>
   virtuosoRef?: React.Ref<VirtuosoHandle>
-  initialScrollIndex?: number
-  onRangeChanged?: (range: ListRange) => void
 }
 
 // Memoized messages list to prevent re-renders when input changes
@@ -36,8 +34,6 @@ export const MessagesList = memo(function MessagesList({
   userInfo,
   onRecall,
   virtuosoRef,
-  initialScrollIndex,
-  onRangeChanged,
 }: MessagesListProps) {
   return (
     <Virtuoso
@@ -45,11 +41,8 @@ export const MessagesList = memo(function MessagesList({
       className='flex-1'
       data={messages}
       overscan={20}
-      initialTopMostItemIndex={
-        initialScrollIndex !== undefined ? initialScrollIndex : messages.length > 0 ? messages.length - 1 : 0
-      }
+      initialTopMostItemIndex={messages.length > 0 ? messages.length - 1 : 0}
       followOutput='smooth'
-      rangeChanged={onRangeChanged}
       itemContent={(_, msg) => (
         <div className='px-4 pb-4'>
           <MessageBubble
