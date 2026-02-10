@@ -1375,7 +1375,7 @@ export function usePrivateMessages(): UsePrivateMessagesReturn {
         }
       }
 
-      // Update session list to reflect new messages (incremental update, no refetch)
+      // Update session list to reflect new messages (optimistic in-place update)
       setSessions(prev => {
         const existingSessionIndex = prev.findIndex(
           s => s.talker_id === notification.talkerId && s.session_type === notification.sessionType
@@ -1417,19 +1417,18 @@ export function usePrivateMessages(): UsePrivateMessagesReturn {
             session.max_seqno = notification.latestSeqno
           }
 
-          // Move to top of list if it has new messages
-          session.session_ts = Date.now() * 1000 // Update timestamp
-          updatedSessions.splice(existingSessionIndex, 1)
-          updatedSessions.unshift(session)
+          // Update session in place — preserve server sort order (sticky sessions, etc.)
+          updatedSessions[existingSessionIndex] = session
 
           return updatedSessions
         }
 
-        // Session not found - this is a new conversation, do a silent background refresh
-        // We'll fetch sessions without showing a spinner
-        refreshSessionsQuietly()
         return prev
       })
+
+      // Silent background refresh to get the authoritative sort order from the server
+      // (respects sticky sessions, custom sorting, new conversations, etc.)
+      refreshSessionsQuietly()
 
       // Keep selectedSession in sync so handleFocus and other consumers see the latest max_seqno
       if (isCurrentSession && notification.latestSeqno) {
