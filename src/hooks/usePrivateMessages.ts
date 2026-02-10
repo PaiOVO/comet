@@ -134,6 +134,11 @@ export function usePrivateMessages(): UsePrivateMessagesReturn {
   // Refs to access latest state in callbacks
   const sessionsRef = useRef<BilibiliSession[]>([])
   const userCacheRef = useRef<UserCache>({})
+  const messagesRef = useRef<BilibiliMessage[]>([])
+  const selectedSessionRef = useRef<BilibiliSession | null>(null)
+
+  // Track window focus state to decide when to mark messages as read vs show notifications
+  const windowFocusedRef = useRef(document.hasFocus())
 
   // Keep refs in sync with state
   useEffect(() => {
@@ -143,6 +148,56 @@ export function usePrivateMessages(): UsePrivateMessagesReturn {
   useEffect(() => {
     userCacheRef.current = userCache
   }, [userCache])
+
+  useEffect(() => {
+    messagesRef.current = messages
+  }, [messages])
+
+  useEffect(() => {
+    selectedSessionRef.current = selectedSession
+  }, [selectedSession])
+
+  // Track window focus state and mark current session as read when regaining focus
+  useEffect(() => {
+    const handleFocus = () => {
+      windowFocusedRef.current = true
+
+      // When window regains focus, mark the current session as read
+      const session = selectedSessionRef.current
+      if (session) {
+        // Derive the latest seqno from current messages to avoid using stale session data.
+        // selectedSession.max_seqno may not reflect messages that arrived while unfocused.
+        const currentMessages = messagesRef.current
+        const latestSeqno = currentMessages.reduce((max, m) => Math.max(max, m.msg_seqno), session.max_seqno || 0)
+
+        window.electronAPI.bilibili
+          .updateAck({
+            talkerId: String(session.talker_id),
+            sessionType: String(session.session_type),
+            ackSeqno: String(latestSeqno),
+          })
+          .catch(err => console.error('Failed to mark as read on focus:', err))
+
+        // Reset unread count for the selected session
+        setSessions(prev =>
+          prev.map(s =>
+            s.talker_id === session.talker_id && s.session_type === session.session_type ? { ...s, unread_count: 0 } : s
+          )
+        )
+      }
+    }
+
+    const handleBlur = () => {
+      windowFocusedRef.current = false
+    }
+
+    window.addEventListener('focus', handleFocus)
+    window.addEventListener('blur', handleBlur)
+    return () => {
+      window.removeEventListener('focus', handleFocus)
+      window.removeEventListener('blur', handleBlur)
+    }
+  }, [])
 
   // Fetch user info for multiple users in batch
   const fetchUserInfoBatch = useCallback(async (uids: number[]) => {
@@ -487,9 +542,7 @@ export function usePrivateMessages(): UsePrivateMessagesReturn {
           }
 
           // Filter out UIDs already in cache or the current user
-          const uidsToFetch = [...senderUids].filter(
-            uid => uid !== userInfo?.mid && !userCacheRef.current[uid]
-          )
+          const uidsToFetch = [...senderUids].filter(uid => uid !== userInfo?.mid && !userCacheRef.current[uid])
 
           if (uidsToFetch.length > 0) {
             fetchUserInfoBatch(uidsToFetch)
@@ -550,9 +603,7 @@ export function usePrivateMessages(): UsePrivateMessagesReturn {
           const existingSeqnos = new Set(prev.map(m => m.msg_seqno))
 
           // Filter out messages that already exist
-          uniqueNewMessages = newMessages.filter(
-            m => !existingKeys.has(m.msg_key) && !existingSeqnos.has(m.msg_seqno)
-          )
+          uniqueNewMessages = newMessages.filter(m => !existingKeys.has(m.msg_key) && !existingSeqnos.has(m.msg_seqno))
 
           if (uniqueNewMessages.length === 0) return prev
 
@@ -570,16 +621,14 @@ export function usePrivateMessages(): UsePrivateMessagesReturn {
               senderUids.add(msg.sender_uid)
             }
           }
-          const uidsToFetch = [...senderUids].filter(
-            uid => uid !== userInfo?.mid && !userCacheRef.current[uid]
-          )
+          const uidsToFetch = [...senderUids].filter(uid => uid !== userInfo?.mid && !userCacheRef.current[uid])
           if (uidsToFetch.length > 0) {
             fetchUserInfoBatch(uidsToFetch)
           }
         }
 
-        // Mark as read since we're viewing this session
-        if (data.data?.max_seqno) {
+        // Only mark as read if the window is focused (user is actively viewing)
+        if (data.data?.max_seqno && windowFocusedRef.current) {
           window.electronAPI.bilibili
             .updateAck({
               talkerId: String(session.talker_id),
@@ -1239,6 +1288,8 @@ export function usePrivateMessages(): UsePrivateMessagesReturn {
         selectedSession?.talker_id === notification.talkerId &&
         selectedSession?.session_type === notification.sessionType
 
+      const isWindowFocused = windowFocusedRef.current
+
       // If the notification is for the currently selected session
       if (isCurrentSession) {
         if (notification.instantMsg) {
@@ -1267,8 +1318,8 @@ export function usePrivateMessages(): UsePrivateMessagesReturn {
             return [...prev, newMessage]
           })
 
-          // Also mark as read since we're viewing it
-          if (selectedSession.max_seqno) {
+          // Only mark as read if the window is focused (user is actively viewing)
+          if (isWindowFocused && selectedSession.max_seqno) {
             window.electronAPI.bilibili
               .updateAck({
                 talkerId: String(selectedSession.talker_id),
@@ -1278,12 +1329,16 @@ export function usePrivateMessages(): UsePrivateMessagesReturn {
               .catch(err => console.error('Failed to mark as read:', err))
           }
 
-          // Show notification if window is not focused (main process will check focus state)
-          console.log('[usePrivateMessages] Current session message - attempting notification')
+          // Show notification (main process will suppress if window is focused)
           showNotificationForMessage(newMessage, instantMsg.senderUid, notification.talkerId, notification.sessionType)
         } else {
           // No instant message data available - do a silent fetch to get new messages
           fetchMessagesQuietly(selectedSession)
+
+          // When window is not focused, also show a notification (fetch the latest message for it)
+          if (!isWindowFocused) {
+            fetchLatestMessageForNotification(notification.talkerId, notification.sessionType)
+          }
         }
       } else {
         // Not the current session - show system notification
@@ -1322,11 +1377,11 @@ export function usePrivateMessages(): UsePrivateMessagesReturn {
           const updatedSessions = [...prev]
           const session = { ...updatedSessions[existingSessionIndex] }
 
-          // Update unread count only if not the currently selected session
-          if (!isCurrentSession) {
-            session.unread_count = (session.unread_count || 0) + 1
-          } else {
+          // Update unread count: only reset to 0 if this is the current session AND window is focused
+          if (isCurrentSession && isWindowFocused) {
             session.unread_count = 0
+          } else {
+            session.unread_count = (session.unread_count || 0) + 1
           }
 
           // Update last_msg if we have instant message data
@@ -1349,6 +1404,11 @@ export function usePrivateMessages(): UsePrivateMessagesReturn {
             }
           }
 
+          // Update max_seqno so ack calls use the latest value
+          if (notification.latestSeqno) {
+            session.max_seqno = notification.latestSeqno
+          }
+
           // Move to top of list if it has new messages
           session.session_ts = Date.now() * 1000 // Update timestamp
           updatedSessions.splice(existingSessionIndex, 1)
@@ -1362,6 +1422,17 @@ export function usePrivateMessages(): UsePrivateMessagesReturn {
         refreshSessionsQuietly()
         return prev
       })
+
+      // Keep selectedSession in sync so handleFocus and other consumers see the latest max_seqno
+      if (isCurrentSession && notification.latestSeqno) {
+        const newSeqno = notification.latestSeqno
+        setSelectedSession(prev => {
+          if (prev?.talker_id === notification.talkerId && prev?.session_type === notification.sessionType) {
+            return { ...prev, max_seqno: newSeqno }
+          }
+          return prev
+        })
+      }
     },
     [
       selectedSession,
