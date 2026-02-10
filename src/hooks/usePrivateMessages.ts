@@ -76,6 +76,7 @@ export interface UsePrivateMessagesReturn {
   sendImageMessage: (imageData: string, mimeType: string) => Promise<boolean>
   recallMessage: (msgSeqno: number, msgKeyStr: string) => Promise<{ success: boolean; error?: string }>
   toggleDnd: (session: BilibiliSession, enabled: boolean) => Promise<boolean>
+  toggleSticky: (session: BilibiliSession, pinned: boolean) => Promise<boolean>
   connectWebSocket: () => Promise<void>
   disconnectWebSocket: () => Promise<void>
 
@@ -876,6 +877,55 @@ export function usePrivateMessages(): UsePrivateMessagesReturn {
     }
   }, [])
 
+  // Toggle sticky (pin/unpin) for a session
+  const toggleSticky = useCallback(async (session: BilibiliSession, pinned: boolean): Promise<boolean> => {
+    try {
+      const result = await window.electronAPI.bilibili.setTop({
+        talkerId: session.talker_id,
+        sessionType: session.session_type,
+        pinned,
+      })
+
+      if (!result.success) {
+        console.error('Failed to toggle sticky:', result.error)
+        toastManager.add({
+          type: 'error',
+          title: '操作失败',
+          description: result.error || '无法更改置顶设置',
+        })
+        return false
+      }
+
+      // Update the session in the sessions list
+      setSessions(prev =>
+        prev.map(s => {
+          if (s.talker_id === session.talker_id && s.session_type === session.session_type) {
+            return { ...s, top_ts: pinned ? Date.now() * 1000 : 0 }
+          }
+          return s
+        })
+      )
+
+      // Also update the selected session if it matches
+      setSelectedSession(prev => {
+        if (prev?.talker_id === session.talker_id && prev?.session_type === session.session_type) {
+          return { ...prev, top_ts: pinned ? Date.now() * 1000 : 0 }
+        }
+        return prev
+      })
+
+      return true
+    } catch (err) {
+      console.error('Failed to toggle sticky:', err)
+      toastManager.add({
+        type: 'error',
+        title: '操作失败',
+        description: '无法更改置顶设置',
+      })
+      return false
+    }
+  }, [])
+
   // Send image message to the current session
   const sendImageMessage = useCallback(
     async (imageData: string, mimeType: string): Promise<boolean> => {
@@ -1595,6 +1645,7 @@ export function usePrivateMessages(): UsePrivateMessagesReturn {
     sendImageMessage,
     recallMessage,
     toggleDnd,
+    toggleSticky,
     connectWebSocket,
     disconnectWebSocket,
 

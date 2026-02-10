@@ -89,6 +89,8 @@ export const BILIBILI_ENDPOINTS = {
   UPDATE_ACK: `${BILIBILI_API.VC}/session_svr/v1/session_svr/update_ack`,
   /** Set Do Not Disturb status for a session */
   SET_DND: `${BILIBILI_API.VC}/link_setting/v1/link_setting/set_msg_dnd`,
+  /** Pin/unpin (sticky) a session */
+  SET_TOP: `${BILIBILI_API.VC}/session_svr/v1/session_svr/set_top`,
 
   // User Info
   /** Fetch user info in batch */

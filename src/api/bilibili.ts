@@ -13,6 +13,7 @@ import type {
   BilibiliSessionsResponse,
   BilibiliUserCardsResponse,
 } from '@/types/bilibili'
+
 import { SESSION_TYPE } from '@/types/bilibili'
 
 import { BILIBILI_ENDPOINTS, BILIBILI_HEADERS, COMMON_HEADERS, getImageExtension } from '@/lib/const'
@@ -239,7 +240,6 @@ function updateAccountCredentials(mid: number, credentials: BilibiliCredentials)
   saveAccounts(accounts)
   return true
 }
-
 
 // Clear all accounts (full logout)
 function clearAllAccounts(): void {
@@ -996,6 +996,62 @@ export function registerBilibiliIpcHandlers() {
       } catch (error) {
         console.error('Failed to set DND status:', error)
         return { success: false, error: 'Failed to set DND status' }
+      }
+    }
+  )
+
+  // Pin/unpin (sticky) a session
+  ipcMain.handle(
+    IpcChannel.BILIBILI_SET_TOP,
+    async (
+      _event,
+      params: {
+        talkerId: number
+        sessionType: number
+        pinned: boolean
+      }
+    ) => {
+      const { talkerId, sessionType, pinned } = params
+      const credentials = getCredentials()
+
+      if (!credentials) {
+        return { success: false, error: 'Not logged in. Please scan QR code to login.' }
+      }
+
+      try {
+        const cookieHeader = cookieStringFromCredentials(credentials)
+
+        const formData = new URLSearchParams()
+        formData.append('talker_id', String(talkerId))
+        formData.append('session_type', String(sessionType))
+        formData.append('op_type', pinned ? '0' : '1') // 0 = pin, 1 = unpin
+        formData.append('csrf', credentials.bili_jct)
+        formData.append('csrf_token', credentials.bili_jct)
+        formData.append('build', '0')
+        formData.append('mobi_app', 'web')
+
+        const resp = await fetch(BILIBILI_ENDPOINTS.SET_TOP, {
+          method: 'POST',
+          headers: {
+            Cookie: cookieHeader,
+            ...COMMON_HEADERS,
+            'Content-Type': 'application/x-www-form-urlencoded',
+            Referer: BILIBILI_HEADERS.REFERER,
+            Origin: BILIBILI_HEADERS.ORIGIN,
+          },
+          body: formData.toString(),
+        })
+
+        const data = await resp.json()
+
+        if (data.code !== 0) {
+          return { success: false, error: data.message || 'Failed to set pin status' }
+        }
+
+        return { success: true }
+      } catch (error) {
+        console.error('Failed to set pin status:', error)
+        return { success: false, error: 'Failed to set pin status' }
       }
     }
   )

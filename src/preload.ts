@@ -29,6 +29,8 @@ import type {
   SetActiveAccountResult,
   SetDndParams,
   SetDndResult,
+  SetTopParams,
+  SetTopResult,
   ShowNotificationParams,
   UpdateAckParams,
   UpdateStatusInfo,
@@ -82,6 +84,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     uploadImage: (params: UploadImageParams): Promise<UploadImageResult> =>
       ipcRenderer.invoke(IpcChannel.BILIBILI_UPLOAD_IMAGE, params),
     setDnd: (params: SetDndParams): Promise<SetDndResult> => ipcRenderer.invoke(IpcChannel.BILIBILI_SET_DND, params),
+    setTop: (params: SetTopParams): Promise<SetTopResult> => ipcRenderer.invoke(IpcChannel.BILIBILI_SET_TOP, params),
 
     // WebSocket for real-time notifications
     wsConnect: (): Promise<{ success: boolean }> => ipcRenderer.invoke(IpcChannel.BILIBILI_WS_CONNECT),

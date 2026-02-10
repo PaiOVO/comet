@@ -76,6 +76,20 @@ export interface SetDndResult {
   error?: string
 }
 
+export interface SetTopParams {
+  /** Talker ID (user mid or fan group id) */
+  talkerId: number
+  /** Session type (1 for user, 2 for fan group) */
+  sessionType: number
+  /** Whether to pin (true) or unpin (false) */
+  pinned: boolean
+}
+
+export interface SetTopResult {
+  success: boolean
+  error?: string
+}
+
 export interface SendMessageResponse {
   code: number
   message?: string
@@ -298,6 +312,7 @@ export interface ElectronAPI {
     sendMessage: (params: SendMessageParams) => Promise<BilibiliSendMessageResponse | ErrorResponse>
     uploadImage: (params: UploadImageParams) => Promise<UploadImageResult>
     setDnd: (params: SetDndParams) => Promise<SetDndResult>
+    setTop: (params: SetTopParams) => Promise<SetTopResult>
 
     // WebSocket for real-time notifications
     wsConnect: () => Promise<{ success: boolean }>

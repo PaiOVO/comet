@@ -1,4 +1,16 @@
-import { ArrowLeft, Bell, BellOff, Copy, EllipsisVertical, ImagePlus, MessageSquare, User, Users } from 'lucide-react'
+import {
+  ArrowLeft,
+  Bell,
+  BellOff,
+  Copy,
+  EllipsisVertical,
+  ImagePlus,
+  MessageSquare,
+  Pin,
+  PinOff,
+  User,
+  Users,
+} from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { VirtuosoHandle } from 'react-virtuoso'
 
@@ -39,6 +51,7 @@ interface MessagesPanelProps {
   onSendImage: (imageData: string, mimeType: string) => Promise<boolean>
   onRecall: (msgSeqno: number, msgKeyStr: string) => Promise<{ success: boolean; error?: string }>
   onToggleDnd: (session: BilibiliSession, enabled: boolean) => Promise<boolean>
+  onToggleSticky: (session: BilibiliSession, pinned: boolean) => Promise<boolean>
 }
 
 export function MessagesPanel({
@@ -55,6 +68,7 @@ export function MessagesPanel({
   onSendImage,
   onRecall,
   onToggleDnd,
+  onToggleSticky,
 }: MessagesPanelProps) {
   return (
     <div
@@ -74,6 +88,7 @@ export function MessagesPanel({
           onSendImage={onSendImage}
           onRecall={onRecall}
           onToggleDnd={onToggleDnd}
+          onToggleSticky={onToggleSticky}
         />
       ) : (
         <EmptyState />
@@ -95,6 +110,7 @@ interface ChatViewProps {
   onSendImage: (imageData: string, mimeType: string) => Promise<boolean>
   onRecall: (msgSeqno: number, msgKeyStr: string) => Promise<{ success: boolean; error?: string }>
   onToggleDnd: (session: BilibiliSession, enabled: boolean) => Promise<boolean>
+  onToggleSticky: (session: BilibiliSession, pinned: boolean) => Promise<boolean>
 }
 
 function ChatView({
@@ -110,6 +126,7 @@ function ChatView({
   onSendImage,
   onRecall,
   onToggleDnd,
+  onToggleSticky,
 }: ChatViewProps) {
   const avatar = getSessionAvatar(session, userCache)
   const virtuosoRef = useRef<VirtuosoHandle>(null)
@@ -119,6 +136,7 @@ function ChatView({
 
   const sessionName = getSessionName(session, userCache)
   const isDnd = session.is_dnd === 1
+  const isSticky = session.top_ts > 0
 
   const copyUsername = useCallback(() => {
     navigator.clipboard.writeText(sessionName)
@@ -131,6 +149,10 @@ function ChatView({
   const handleToggleDnd = useCallback(() => {
     onToggleDnd(session, !isDnd)
   }, [session, isDnd, onToggleDnd])
+
+  const handleToggleSticky = useCallback(() => {
+    onToggleSticky(session, !isSticky)
+  }, [session, isSticky, onToggleSticky])
 
   // Reset state when session changes
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally reset state when session changes
@@ -268,6 +290,14 @@ function ChatView({
             <EllipsisVertical className='size-5' aria-hidden='true' />
           </MenuTrigger>
           <MenuPopup align='end'>
+            <MenuItem onClick={handleToggleSticky}>
+              {isSticky ? (
+                <PinOff className='size-4' aria-hidden='true' />
+              ) : (
+                <Pin className='size-4' aria-hidden='true' />
+              )}
+              {isSticky ? '取消置顶' : '置顶'}
+            </MenuItem>
             <MenuItem onClick={handleToggleDnd}>
               {isDnd ? (
                 <Bell className='size-4' aria-hidden='true' />

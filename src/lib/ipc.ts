@@ -39,6 +39,8 @@ import type {
   SetActiveAccountResult,
   SetDndParams,
   SetDndResult,
+  SetTopParams,
+  SetTopResult,
   ShowNotificationParams,
   UpdateAckParams,
   UpdateAckResponse,
@@ -88,6 +90,7 @@ export const IpcChannel = {
   BILIBILI_SEND_MESSAGE: 'bilibili:send-message',
   BILIBILI_UPLOAD_IMAGE: 'bilibili:upload-image',
   BILIBILI_SET_DND: 'bilibili:set-dnd',
+  BILIBILI_SET_TOP: 'bilibili:set-top',
 
   // Bilibili WebSocket
   BILIBILI_WS_CONNECT: 'bilibili:ws-connect',
@@ -222,6 +225,10 @@ export interface IpcInvokeContract {
   [IpcChannel.BILIBILI_SET_DND]: {
     params: SetDndParams
     result: SetDndResult
+  }
+  [IpcChannel.BILIBILI_SET_TOP]: {
+    params: SetTopParams
+    result: SetTopResult
   }
 
   // Bilibili WebSocket
