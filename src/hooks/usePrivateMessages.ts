@@ -588,6 +588,14 @@ export function usePrivateMessages(): UsePrivateMessagesReturn {
           return
         }
 
+        // Guard: only update if still viewing this session (prevents stale responses)
+        if (
+          selectedSessionRef.current?.talker_id !== session.talker_id ||
+          selectedSessionRef.current?.session_type !== session.session_type
+        ) {
+          return
+        }
+
         const newMessages = data.data?.messages || []
 
         // Merge emoji infos from this response
