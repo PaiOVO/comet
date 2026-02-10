@@ -203,6 +203,8 @@ export function MessageInput({
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Don't intercept Enter while IME is composing (e.g. pinyin → 中文); let IME confirm first
+    if (e.nativeEvent.isComposing) return
     // Send on Enter, but allow Shift+Enter for new line
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
