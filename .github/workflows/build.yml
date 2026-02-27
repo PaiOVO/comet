@@ -212,7 +212,7 @@ jobs:
 
       - name: Upload artifacts for debugging (Windows)
         if: matrix.os == 'windows-latest' && !startsWith(github.ref, 'refs/tags/v')
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: build-win-${{ github.sha }}
           path: |
@@ -223,7 +223,7 @@ jobs:
 
       - name: Upload artifacts for debugging (macOS)
         if: matrix.os == 'macos-latest' && !startsWith(github.ref, 'refs/tags/v')
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: build-darwin-${{ github.sha }}
           path: out/make/zip/darwin/**/*.zip
