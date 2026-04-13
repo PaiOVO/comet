@@ -187,7 +187,7 @@ jobs:
       # GitHub Releases
       - name: Upload Windows Release to GitHub
         if: matrix.os == 'windows-latest' && startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           draft: false
           generate_release_notes: true
@@ -200,7 +200,7 @@ jobs:
 
       - name: Upload macOS Release to GitHub
         if: matrix.os == 'macos-latest' && startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           draft: false
           generate_release_notes: true
