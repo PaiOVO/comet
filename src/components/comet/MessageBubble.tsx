@@ -18,7 +18,7 @@ import type { CheckLoginResult } from '@/types/electron'
 
 import { MSG_SOURCE, MSG_TYPE, SESSION_TYPE } from '@/types/bilibili'
 
-import { formatAbsoluteTime, formatTime, getSessionAvatar } from '@/lib/message-utils'
+import { formatTime, getSessionAvatar } from '@/lib/message-utils'
 import { cn } from '@/lib/utils'
 
 import { enforceHttps } from '@/utils/enforceHttps'
@@ -30,9 +30,9 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from '@/components/ui/menu'
 import { Popover, PopoverPopup, PopoverTitle, PopoverTrigger } from '@/components/ui/popover'
 import { Separator } from '@/components/ui/separator'
 import { toastManager } from '@/components/ui/toast'
-import { Tooltip, TooltipPopup, TooltipTrigger } from '@/components/ui/tooltip'
 
 import { useSettings } from '@/stores/useSettings'
+import { TimeTooltip } from './TimeTooltip'
 
 interface MessageBubbleProps {
   message: BilibiliMessage
@@ -341,8 +341,8 @@ function renderNotificationContent(content: {
       {/* Modules list */}
       {modules && modules.length > 0 && (
         <div className='space-y-1.5'>
-          {modules.map((module, index) => (
-            <div key={`${index}-${module.title}`} className='flex gap-4 text-sm'>
+          {modules.map(module => (
+            <div key={`${module.title}-${module.detail}`} className='flex gap-4 text-sm'>
               <span className='w-24 shrink-0 text-muted-foreground'>{module.title}</span>
               <span>{module.detail}</span>
             </div>
@@ -1030,12 +1030,9 @@ export function MessageBubble({
           </ContextMenuPopup>
         </ContextMenu>
         <div className={`flex items-center gap-1.5 ${isSent ? 'flex-row-reverse' : ''}`}>
-          <Tooltip>
-            <TooltipTrigger className='cursor-default px-1 text-muted-foreground text-xs'>
-              {formatTime(message.timestamp)}
-            </TooltipTrigger>
-            <TooltipPopup>{formatAbsoluteTime(message.timestamp)}</TooltipPopup>
-          </Tooltip>
+          <TimeTooltip timestamp={message.timestamp} className='cursor-default px-1 text-muted-foreground text-xs'>
+            {formatTime(message.timestamp)}
+          </TimeTooltip>
           {sourceLabel && (
             <span
               className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs ${

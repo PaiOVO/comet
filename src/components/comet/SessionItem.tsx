@@ -74,9 +74,7 @@ export function SessionItem({ session, isSelected, userCache, onClick }: Session
             <span className='truncate font-medium' style={vipNicknameColor ? { color: vipNicknameColor } : undefined}>
               {getSessionName(session, userCache)}
             </span>
-            {session.top_ts > 0 && (
-              <Pin className='size-3.5 flex-none text-muted-foreground' aria-label='置顶' />
-            )}
+            {session.top_ts > 0 && <Pin className='size-3.5 flex-none text-muted-foreground' aria-label='置顶' />}
             {session.is_dnd === 1 && (
               <BellOff className='size-3.5 flex-none text-muted-foreground' aria-label='免打扰' />
             )}
