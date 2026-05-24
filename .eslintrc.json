@@ -13,6 +13,7 @@
     "plugin:import/typescript"
   ],
   "parser": "@typescript-eslint/parser",
+  "ignorePatterns": ["node_modules/", "dist/", "out/", "references/"],
   "settings": {
     "import/resolver": {
       "typescript": {
