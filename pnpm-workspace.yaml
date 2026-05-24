@@ -1,3 +1,4 @@
+blockExoticSubdeps: false
 allowBuilds:
   electron-winstaller: true
   esbuild: true
