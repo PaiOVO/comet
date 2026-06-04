@@ -58,8 +58,12 @@ export class BroadcastWebSocketManager {
    * Connect to the Bilibili broadcast WebSocket
    */
   async connect(): Promise<void> {
+    // Tear down any existing socket WITHOUT letting its handlers fire. If we let
+    // the old socket's `close` event run, it would emit a spurious onDisconnected
+    // and schedule a zombie reconnect that races against (and later kills) the
+    // connection we're about to create here.
     if (this.ws) {
-      this.disconnect()
+      this.teardownSocket()
     }
 
     this.shouldReconnect = true
@@ -78,25 +82,32 @@ export class BroadcastWebSocketManager {
 
       // Must use "proto" subprotocol - server requires this
       // Include authentication cookies so server knows which user this is
-      this.ws = new WebSocket(BILIBILI_ENDPOINTS.BROADCAST_WS, 'proto', {
+      const ws = new WebSocket(BILIBILI_ENDPOINTS.BROADCAST_WS, 'proto', {
         headers: {
           Cookie: cookieHeader,
           'User-Agent': USER_AGENT,
           Origin: BILIBILI_HEADERS.ORIGIN,
         },
       })
+      this.ws = ws
 
-      this.ws.on('open', () => {
+      // Handlers are bound to this specific socket. The `this.ws !== ws` guard
+      // makes a superseded socket's queued events no-ops, so a stale connection
+      // can never mutate manager state or trigger a reconnect.
+      ws.on('open', () => {
+        if (this.ws !== ws) return
         console.log('[BroadcastWS] Connected')
         this.isConnected = true
         this.sendAuth()
       })
 
-      this.ws.on('message', (data: WebSocket.Data) => {
+      ws.on('message', (data: WebSocket.Data) => {
+        if (this.ws !== ws) return
         this.handleMessage(data)
       })
 
-      this.ws.on('close', (code, reason) => {
+      ws.on('close', (code, reason) => {
+        if (this.ws !== ws) return
         console.log('[BroadcastWS] Disconnected:', code, reason.toString())
         this.cleanup()
         this.config.onDisconnected?.()
@@ -106,7 +117,8 @@ export class BroadcastWebSocketManager {
         }
       })
 
-      this.ws.on('error', error => {
+      ws.on('error', error => {
+        if (this.ws !== ws) return
         console.error('[BroadcastWS] Error:', error)
         this.config.onError?.(error)
       })
@@ -125,10 +137,42 @@ export class BroadcastWebSocketManager {
   disconnect(): void {
     this.shouldReconnect = false
     this.cleanup()
+    this.teardownSocket()
+  }
 
-    if (this.ws) {
-      this.ws.close()
-      this.ws = null
+  /**
+   * Detach all listeners from the current socket and close it.
+   *
+   * Removing the listeners (and nulling `this.ws`) BEFORE closing guarantees a
+   * superseded socket can't fire `close`/`error` handlers that would flip UI
+   * state or schedule a reconnect for a connection we've already replaced.
+   * Also clears any pending heartbeat/reconnect timers tied to the old socket.
+   */
+  private teardownSocket(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer)
+      this.heartbeatTimer = null
+    }
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+
+    if (!this.ws) return
+    const ws = this.ws
+    this.ws = null
+    ws.removeAllListeners()
+    // A socket still in CONNECTING state emits an async 'error' event
+    // ("WebSocket was closed before the connection was established") when closed.
+    // With no listener attached that would crash the process, so install a
+    // no-op error sink before closing.
+    ws.on('error', () => {
+      // Swallow late handshake-abort errors from the discarded socket.
+    })
+    try {
+      ws.close()
+    } catch {
+      // Closing an already-closed/closing socket is a no-op we can safely ignore.
     }
   }
 
