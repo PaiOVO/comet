@@ -390,6 +390,10 @@ export interface BilibiliNavResponse {
     mid?: number
     uname?: string
     face?: string
+    wbi_img?: {
+      img_url: string
+      sub_url: string
+    }
   }
 }
 

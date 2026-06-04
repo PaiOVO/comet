@@ -1,3 +1,4 @@
+import { createHash, randomUUID } from 'node:crypto'
 import { Byte, Encoder } from '@nuintun/qrcode'
 import { ipcMain, safeStorage } from 'electron'
 import Store from 'electron-store'
@@ -34,6 +35,94 @@ function preserveLargeIntegers(responseText: string): string {
   return responseText.replace(/"msg_key"\s*:\s*(\d{15,})/g, '"msg_key":"$1"')
 }
 
+// ============================================================================
+// Wbi signing
+//
+// Bilibili gates certain endpoints (e.g. web_im send_msg) behind a "Wbi"
+// signature. The w_* query params must be signed with a `w_rid` (md5) and
+// `wts` (timestamp), salted with a mixin key derived from two rotating keys
+// (img_key + sub_key) exposed by the nav endpoint. Requests without a valid
+// signature get a 412 risk-control HTML block page instead of JSON.
+// ============================================================================
+
+// Permutation table used to derive the 32-char mixin key from img_key + sub_key.
+const MIXIN_KEY_ENC_TAB = [
+  46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49, 33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41,
+  13, 37, 48, 7, 16, 24, 55, 40, 61, 26, 17, 0, 1, 60, 51, 30, 4, 22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11, 36, 20, 34,
+  44, 52,
+]
+
+function getMixinKey(rawWbiKey: string): string {
+  return MIXIN_KEY_ENC_TAB.map(n => rawWbiKey[n])
+    .join('')
+    .slice(0, 32)
+}
+
+/**
+ * Sign a set of params with the Wbi algorithm.
+ * Adds `wts`, sorts params alphabetically, builds the query string, then
+ * appends `w_rid = md5(query + mixinKey)`.
+ *
+ * @returns The signed query string (without leading `?`)
+ */
+function encWbi(params: Record<string, string | number>, imgKey: string, subKey: string, timestampSec: number): string {
+  const mixinKey = getMixinKey(imgKey + subKey)
+  const signedParams: Record<string, string | number> = { ...params, wts: timestampSec }
+  // Bilibili strips these characters from values before signing
+  const charFilter = /[!'()*]/g
+  const query = Object.keys(signedParams)
+    .sort()
+    .map(key => {
+      const value = String(signedParams[key]).replace(charFilter, '')
+      return `${encodeURIComponent(key)}=${encodeURIComponent(value)}`
+    })
+    .join('&')
+  const wRid = createHash('md5')
+    .update(query + mixinKey)
+    .digest('hex')
+  return `${query}&w_rid=${wRid}`
+}
+
+// Cached Wbi keys (they rotate, so refresh periodically or on demand).
+let wbiKeyCache: { imgKey: string; subKey: string; fetchedAt: number } | null = null
+const WBI_KEY_TTL_MS = 6 * 60 * 60 * 1000 // 6 hours
+
+/** Extract the key (filename without extension) from a wbi img/sub URL. */
+function keyFromWbiUrl(url: string): string {
+  return url.slice(url.lastIndexOf('/') + 1, url.lastIndexOf('.'))
+}
+
+/**
+ * Fetch (and cache) the Wbi img_key/sub_key from the nav endpoint.
+ * @param forceRefresh - bypass the cache (used after a 412 to pick up rotated keys)
+ */
+async function getWbiKeys(
+  cookieHeader: string,
+  forceRefresh = false
+): Promise<{ imgKey: string; subKey: string } | null> {
+  if (!forceRefresh && wbiKeyCache && Date.now() - wbiKeyCache.fetchedAt < WBI_KEY_TTL_MS) {
+    return { imgKey: wbiKeyCache.imgKey, subKey: wbiKeyCache.subKey }
+  }
+
+  try {
+    const resp = await fetch(BILIBILI_ENDPOINTS.NAV, {
+      headers: { Cookie: cookieHeader, ...COMMON_HEADERS },
+    })
+    const data: BilibiliNavResponse = await resp.json()
+    const wbiImg = data.data?.wbi_img
+    if (!wbiImg?.img_url || !wbiImg?.sub_url) {
+      return null
+    }
+    const imgKey = keyFromWbiUrl(wbiImg.img_url)
+    const subKey = keyFromWbiUrl(wbiImg.sub_url)
+    wbiKeyCache = { imgKey, subKey, fetchedAt: Date.now() }
+    return { imgKey, subKey }
+  } catch (error) {
+    console.error('Failed to fetch Wbi keys:', error)
+    return null
+  }
+}
+
 // Types for multi-account storage
 export interface StoredAccountUserInfo {
   mid: number
@@ -52,6 +141,11 @@ interface AccountsStoreSchema {
   accounts: string | null
   // The mid of the currently active account
   activeAccountMid: number | null
+  // Stable per-account device ids (mid -> uuid), mirrors Bilibili's im_deviceid_<uid>
+  deviceIds: Record<string, string>
+  // Device fingerprint cookies (buvid3/buvid4) required by gaia risk control
+  buvid3: string | null
+  buvid4: string | null
 }
 
 // Initialize electron-store for persistent storage
@@ -60,8 +154,60 @@ const store = new Store<AccountsStoreSchema>({
   defaults: {
     accounts: null,
     activeAccountMid: null,
+    deviceIds: {},
+    buvid3: null,
+    buvid4: null,
   },
 })
+
+/**
+ * Fetch (and cache) buvid3/buvid4 device-fingerprint cookies.
+ * Bilibili's gaia risk control gates write endpoints (e.g. send_msg) on these;
+ * they are anonymous device IDs from /x/frontend/finger/spi, persisted so the
+ * device identity stays stable across sends.
+ */
+async function getBuvids(): Promise<{ buvid3: string; buvid4: string } | null> {
+  const cached3 = store.get('buvid3')
+  const cached4 = store.get('buvid4')
+  if (cached3 && cached4) {
+    return { buvid3: cached3, buvid4: cached4 }
+  }
+
+  try {
+    const resp = await fetch(BILIBILI_ENDPOINTS.FINGER_SPI, {
+      headers: { ...COMMON_HEADERS },
+    })
+    const data: { code: number; data?: { b_3?: string; b_4?: string } } = await resp.json()
+    const b3 = data.data?.b_3
+    const b4 = data.data?.b_4
+    if (data.code !== 0 || !b3 || !b4) {
+      return null
+    }
+    store.set('buvid3', b3)
+    store.set('buvid4', b4)
+    return { buvid3: b3, buvid4: b4 }
+  } catch (error) {
+    console.error('Failed to fetch buvid fingerprint:', error)
+    return null
+  }
+}
+
+/**
+ * Get (or lazily create + persist) a stable device id for an account.
+ * Bilibili's web client derives dev_id from the sender uid and persists it in
+ * localStorage (`im_deviceid_<uid>`); a fresh dev_id on every send looks
+ * bot-like and is rejected by risk control, so we persist one per account.
+ */
+function getOrCreateDevId(mid: number | string): string {
+  const key = String(mid)
+  const deviceIds = store.get('deviceIds') || {}
+  if (deviceIds[key]) {
+    return deviceIds[key]
+  }
+  const devId = randomUUID().toUpperCase()
+  store.set('deviceIds', { ...deviceIds, [key]: devId })
+  return devId
+}
 
 // Helper to encrypt data
 function encryptData(data: unknown): string {
@@ -248,7 +394,7 @@ function clearAllAccounts(): void {
 }
 
 // Export for use by other modules (like WebSocket)
-export { getCredentials, getAccounts, getActiveAccount, getActiveAccountMid, clearAllAccounts }
+export { clearAllAccounts, getAccounts, getActiveAccount, getActiveAccountMid, getCredentials }
 
 // Helper function to build cookie string from credentials
 export function cookieStringFromCredentials(credentials: BilibiliCredentials): string {
@@ -815,51 +961,111 @@ export function registerBilibiliIpcHandlers() {
       }
 
       try {
-        const cookieHeader = cookieStringFromCredentials(credentials)
+        // send_msg is gated by gaia risk control, which requires the buvid3/buvid4
+        // device-fingerprint cookies in addition to the login credentials.
+        const buvids = await getBuvids()
+        const cookieHeader = [
+          cookieStringFromCredentials(credentials),
+          buvids ? `buvid3=${buvids.buvid3}` : '',
+          buvids ? `buvid4=${buvids.buvid4}` : '',
+        ]
+          .filter(Boolean)
+          .join('; ')
 
-        // Generate a UUID for dev_id
-        const devId = crypto.randomUUID().toUpperCase()
+        // Stable device id for this account (persisted, not regenerated per send)
+        const devId = getOrCreateDevId(credentials.DedeUserID)
         const timestamp = Math.floor(Date.now() / 1000)
 
+        // Body params mirror the web client's send_msg request exactly
         const formData = new URLSearchParams()
         formData.append('msg[sender_uid]', String(credentials.DedeUserID))
-        formData.append('msg[receiver_id]', receiverId)
         formData.append('msg[receiver_type]', receiverType)
+        formData.append('msg[receiver_id]', receiverId)
         formData.append('msg[msg_type]', msgType)
         formData.append('msg[msg_status]', '0')
+        formData.append('msg[content]', content)
+        formData.append('msg[new_face_version]', '0')
+        formData.append('msg[canal_token]', '')
         formData.append('msg[dev_id]', devId)
         formData.append('msg[timestamp]', String(timestamp))
-        formData.append('msg[new_face_version]', '1')
-        formData.append('msg[content]', content)
-        formData.append('csrf', credentials.bili_jct)
-        formData.append('csrf_token', credentials.bili_jct)
+        formData.append('from_firework', '0')
         formData.append('build', '0')
         formData.append('mobi_app', 'web')
+        formData.append('csrf', credentials.bili_jct)
 
-        // Build URL with optional Wbi signature params
-        const url = new URL(BILIBILI_ENDPOINTS.SEND_MESSAGE)
-        url.searchParams.set('w_sender_uid', String(credentials.DedeUserID))
-        url.searchParams.set('w_receiver_id', receiverId)
-        url.searchParams.set('w_dev_id', devId)
+        // The send_msg endpoint is gated behind Wbi risk control: the w_* query
+        // params must be signed with w_rid/wts, otherwise it returns a 412 HTML
+        // block page. Sign and POST; if the keys have rotated (412/non-JSON),
+        // refresh them once and retry.
+        type SendResult =
+          | { kind: 'ok'; data: BilibiliSendMessageResponse }
+          | { kind: 'blocked'; status: number; snippet?: string }
+          | { kind: 'no-keys' }
 
-        const resp = await fetch(url.toString(), {
-          method: 'POST',
-          headers: {
-            Cookie: cookieHeader,
-            ...COMMON_HEADERS,
-            'Content-Type': 'application/x-www-form-urlencoded',
-            Referer: BILIBILI_HEADERS.REFERER,
-            Origin: BILIBILI_HEADERS.ORIGIN,
-          },
-          body: formData.toString(),
-        })
+        const sendOnce = async (forceRefreshKeys: boolean): Promise<SendResult> => {
+          const wbiKeys = await getWbiKeys(cookieHeader, forceRefreshKeys)
+          if (!wbiKeys) {
+            return { kind: 'no-keys' }
+          }
 
-        // Get response as text first, then preserve large integers before parsing
-        const responseText = await resp.text()
-        const data: BilibiliSendMessageResponse = JSON.parse(preserveLargeIntegers(responseText))
+          const signedQuery = encWbi(
+            {
+              w_sender_uid: String(credentials.DedeUserID),
+              w_receiver_id: receiverId,
+              w_dev_id: devId,
+            },
+            wbiKeys.imgKey,
+            wbiKeys.subKey,
+            timestamp
+          )
 
+          const resp = await fetch(`${BILIBILI_ENDPOINTS.SEND_MESSAGE}?${signedQuery}`, {
+            method: 'POST',
+            headers: {
+              Cookie: cookieHeader,
+              ...COMMON_HEADERS,
+              'Content-Type': 'application/x-www-form-urlencoded',
+              Referer: BILIBILI_HEADERS.REFERER,
+              Origin: BILIBILI_HEADERS.ORIGIN,
+            },
+            body: formData.toString(),
+          })
+
+          // Get response as text first, then preserve large integers before parsing
+          const responseText = await resp.text()
+          try {
+            const data: BilibiliSendMessageResponse = JSON.parse(preserveLargeIntegers(responseText))
+            return { kind: 'ok', data }
+          } catch {
+            // Non-JSON response (risk-control block page)
+            // DIAGNOSTIC: surface status + body snippet to the renderer console
+            return {
+              kind: 'blocked',
+              status: resp.status,
+              snippet: responseText.replace(/\s+/g, ' ').slice(0, 300),
+            }
+          }
+        }
+
+        let result = await sendOnce(false)
+        // Risk-control block: keys may have rotated — refresh and retry once
+        if (result.kind === 'blocked') {
+          result = await sendOnce(true)
+        }
+
+        if (result.kind === 'no-keys') {
+          return { error: 'Failed to obtain Wbi signature keys', code: 412 }
+        }
+        if (result.kind === 'blocked') {
+          return {
+            error: `[diag] blocked HTTP ${result.status} devId=${devId} body=${result.snippet ?? ''}`,
+            code: 412,
+          }
+        }
+
+        const { data } = result
         if (data.code !== 0) {
-          return { error: data.message || 'Failed to send message', code: data.code }
+          return { error: `[diag] code=${data.code} msg=${data.message || '(empty)'}`, code: data.code }
         }
 
         return data

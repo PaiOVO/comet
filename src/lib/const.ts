@@ -92,6 +92,10 @@ export const BILIBILI_ENDPOINTS = {
   /** Pin/unpin (sticky) a session */
   SET_TOP: `${BILIBILI_API.VC}/session_svr/v1/session_svr/set_top`,
 
+  // Risk control / device fingerprint
+  /** Fetch buvid3/buvid4 device fingerprint cookies (gaia risk control) */
+  FINGER_SPI: `${BILIBILI_API.MAIN}/x/frontend/finger/spi`,
+
   // User Info
   /** Fetch user info in batch */
   USER_INFOS: `${BILIBILI_API.VC}/x/im/user_infos`,
