@@ -23,12 +23,22 @@ let lastHadUnread: boolean | null = null
 interface AppPrefsSchema {
   hasShownTrayHint: boolean
 }
-const prefsStore = new Store<AppPrefsSchema>({
-  name: 'app-prefs',
-  defaults: { hasShownTrayHint: false },
-  // Self-heal a corrupt prefs file (reset to defaults) instead of throwing at startup.
-  clearInvalidConfig: true,
-})
+// Constructed lazily inside maybeShowTrayHint's try/catch, never at module load:
+// `new Store()` reads and writes the prefs file on construction, which can throw
+// on an unreadable/locked path or a path that is a directory — that would crash
+// the main process before any window opens. (clearInvalidConfig only heals
+// malformed content, not filesystem errors.)
+let prefsStore: Store<AppPrefsSchema> | null = null
+function getPrefsStore(): Store<AppPrefsSchema> {
+  if (!prefsStore) {
+    prefsStore = new Store<AppPrefsSchema>({
+      name: 'app-prefs',
+      defaults: { hasShownTrayHint: false },
+      clearInvalidConfig: true,
+    })
+  }
+  return prefsStore
+}
 
 function getIcons(): { normal: NativeImage; unread: NativeImage } {
   if (!normalIcon) normalIcon = nativeImage.createFromDataURL(TRAY_ICONS[iconEnv].normal)
@@ -118,9 +128,11 @@ export function updateTrayUnread(count: number): void {
  */
 export function maybeShowTrayHint(): void {
   // A best-effort one-time hint must never bubble out of the window 'close'
-  // handler — guard every electron-store read/write (e.g. an unreadable file).
+  // handler — guard store construction and every read/write (e.g. an unreadable
+  // prefs file or a path that is a directory).
   try {
-    if (prefsStore.get('hasShownTrayHint')) return
+    const store = getPrefsStore()
+    if (store.get('hasShownTrayHint')) return
     if (!Notification.isSupported()) return
 
     new Notification({
@@ -128,7 +140,7 @@ export function maybeShowTrayHint(): void {
       body: 'LAPLACE Comet 仍在后台运行，可从系统托盘重新打开。',
     }).show()
 
-    prefsStore.set('hasShownTrayHint', true)
+    store.set('hasShownTrayHint', true)
   } catch (err) {
     console.error('[Tray] tray hint failed (non-fatal):', err)
   }
