@@ -172,7 +172,9 @@ function generateTrayIcons(sourceIcon: string, outputDir: string, description: s
     )
     console.log(`✓ Generated ${description} tray.png + tray-unread.png`)
   } catch (error) {
+    // Fail closed: a half-generated set must never feed generateTrayIconModule().
     console.error(`Failed to generate ${description} tray icons:`, error)
+    process.exit(1)
   }
 }
 
@@ -182,14 +184,15 @@ function pngToDataUrl(pngPath: string): string {
 }
 
 function generateTrayIconModule() {
-  const envs = (['dev', 'prod'] as const).filter(env => {
+  // Fail closed: every required variant must have BOTH tray assets, or we abort
+  // rather than emit a partial/stale TRAY_ICONS module that would break the app.
+  const envs = ['dev', 'prod'] as const
+  for (const env of envs) {
     const dir = iconConfigs[env].outputDir
-    return existsSync(path.join(dir, 'tray.png')) && existsSync(path.join(dir, 'tray-unread.png'))
-  })
-
-  if (envs.length === 0) {
-    console.error('No tray icons found; skipping tray-icons.generated.ts')
-    return
+    if (!existsSync(path.join(dir, 'tray.png')) || !existsSync(path.join(dir, 'tray-unread.png'))) {
+      console.error(`Missing tray icons for "${env}" in ${dir}; not emitting tray-icons.generated.ts`)
+      process.exit(1)
+    }
   }
 
   const body = envs
