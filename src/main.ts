@@ -10,7 +10,7 @@ import { registerBilibiliIpcHandlers } from './api/bilibili'
 import { cleanupBroadcastWebSocket, initBroadcastWebSocket } from './api/broadcast-websocket'
 import { UPDATE_BASE_URL } from './lib/const'
 import { IpcChannel, IpcEvent } from './lib/ipc'
-import { createTray, destroyTray, focusMainWindow, maybeShowTrayHint } from './tray'
+import { createTray, destroyTray, focusMainWindow, maybeShowTrayHint, updateTrayUnread } from './tray'
 
 // https://github.com/electron/forge/issues/3439#issuecomment-3197027877
 const __filename = fileURLToPath(import.meta.url)
@@ -241,6 +241,9 @@ function createBadgeIcon(count: number): Electron.NativeImage {
 
 // Badge count IPC handler (macOS dock badge / Windows taskbar overlay)
 ipcMain.handle(IpcChannel.APP_SET_BADGE_COUNT, (_event, count: number) => {
+  // Reflect unread state on the system tray (Windows/Linux); no-op elsewhere.
+  updateTrayUnread(count)
+
   if (process.platform === 'darwin') {
     // On macOS, setBadge takes a string - empty string clears the badge
     app.dock?.setBadge(count > 0 ? String(count) : '')
