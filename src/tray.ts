@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, nativeImage, Notification, Tray } from 'electron'
+import { app, BrowserWindow, Menu, type NativeImage, Notification, nativeImage, Tray } from 'electron'
 import Store from 'electron-store'
 
 import { TRAY_ICONS } from '@/assets/tray-icons.generated'
@@ -12,8 +12,8 @@ function isTraySupported(): boolean {
 const iconEnv = process.env.NODE_ENV === 'development' ? 'dev' : 'prod'
 
 let tray: Tray | null = null
-let normalIcon: Electron.NativeImage | null = null
-let unreadIcon: Electron.NativeImage | null = null
+let normalIcon: NativeImage | null = null
+let unreadIcon: NativeImage | null = null
 
 // Tracks the last unread state so the tray image is only swapped when crossing
 // the zero boundary (e.g. 3 -> 4 updates the tooltip but not the image).
@@ -28,7 +28,7 @@ const prefsStore = new Store<AppPrefsSchema>({
   defaults: { hasShownTrayHint: false },
 })
 
-function getIcons(): { normal: Electron.NativeImage; unread: Electron.NativeImage } {
+function getIcons(): { normal: NativeImage; unread: NativeImage } {
   if (!normalIcon) normalIcon = nativeImage.createFromDataURL(TRAY_ICONS[iconEnv].normal)
   if (!unreadIcon) unreadIcon = nativeImage.createFromDataURL(TRAY_ICONS[iconEnv].unread)
   return { normal: normalIcon, unread: unreadIcon }
@@ -40,6 +40,8 @@ function getIcons(): { normal: Electron.NativeImage; unread: Electron.NativeImag
  * Returns the window so callers can post follow-up messages to it.
  */
 export function focusMainWindow(): BrowserWindow | null {
+  // Resolve the window at call time (not at registration), so a notification-click
+  // handler registered earlier still focuses the current window.
   const win = BrowserWindow.getAllWindows()[0]
   if (!win) return null
 
@@ -61,7 +63,7 @@ export function focusMainWindow(): BrowserWindow | null {
   return win
 }
 
-function buildContextMenu(): Electron.Menu {
+function buildContextMenu(): Menu {
   return Menu.buildFromTemplate([
     { label: '打开 LAPLACE Comet', click: () => focusMainWindow() },
     { type: 'separator' },

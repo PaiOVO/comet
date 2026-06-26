@@ -239,7 +239,7 @@ function createBadgeIcon(count: number): Electron.NativeImage {
   return nativeImage.createFromBuffer(Buffer.from(canvas))
 }
 
-// Badge count IPC handler (macOS dock badge / Windows taskbar overlay)
+// Badge count IPC handler (macOS dock badge / Windows taskbar overlay / tray indicator)
 ipcMain.handle(IpcChannel.APP_SET_BADGE_COUNT, (_event, count: number) => {
   // Reflect unread state on the system tray (Windows/Linux); no-op elsewhere.
   updateTrayUnread(count)
@@ -511,6 +511,7 @@ app.on('before-quit', () => {
 // Quit when all windows are closed, except on macOS. There, it's common
 // for applications and their menu bar to stay active until the user quits
 // explicitly with Cmd + Q.
+// On Windows/Linux the window hides to the tray on close instead of being destroyed, so this normally only fires during an explicit quit.
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
