@@ -13,7 +13,7 @@
     "plugin:import/typescript"
   ],
   "parser": "@typescript-eslint/parser",
-  "ignorePatterns": ["node_modules/", "dist/", "out/", "references/"],
+  "ignorePatterns": ["node_modules/", "dist/", "out/", "references/", "src/assets/tray-icons.generated.ts"],
   "settings": {
     "import/resolver": {
       "typescript": {

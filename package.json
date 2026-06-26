@@ -12,6 +12,7 @@
     "make": "electron-forge make",
     "publish": "electron-forge publish",
     "lint": "eslint --ext .ts,.tsx .",
+    "typecheck": "tsc --noEmit",
     "generate-icons": "bun run scripts/generate-icons.ts"
   },
   "keywords": [],
