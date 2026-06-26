@@ -10,11 +10,16 @@ import { registerBilibiliIpcHandlers } from './api/bilibili'
 import { cleanupBroadcastWebSocket, initBroadcastWebSocket } from './api/broadcast-websocket'
 import { UPDATE_BASE_URL } from './lib/const'
 import { IpcChannel, IpcEvent } from './lib/ipc'
-import { focusMainWindow } from './tray'
+import { createTray, destroyTray, focusMainWindow, maybeShowTrayHint } from './tray'
 
 // https://github.com/electron/forge/issues/3439#issuecomment-3197027877
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
+
+// Set to true once the user explicitly quits (tray menu, Ctrl+Q, or an update
+// install) so the window 'close' handler stops hiding to the tray and lets the
+// app actually exit.
+let isQuitting = false
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (started) {
@@ -320,6 +325,17 @@ const createWindow = () => {
   if (process.env.NODE_ENV === 'development') {
     mainWindow.webContents.openDevTools()
   }
+
+  // On Windows/Linux, closing the window hides it to the tray instead of
+  // quitting, so the app keeps receiving messages in the background. A real
+  // quit (tray menu / Ctrl+Q / update install) sets isQuitting first.
+  mainWindow.on('close', event => {
+    if (!isQuitting && (process.platform === 'win32' || process.platform === 'linux')) {
+      event.preventDefault()
+      mainWindow.hide()
+      maybeShowTrayHint()
+    }
+  })
 }
 
 // Create application menu
@@ -416,7 +432,11 @@ const createApplicationMenu = () => {
               { type: 'separator' as const },
               { role: 'window' as const },
             ]
-          : [{ role: 'close' as const, label: '关闭' }]),
+          : [
+              { role: 'close' as const, label: '关闭' },
+              { type: 'separator' as const },
+              { label: '退出', accelerator: 'CmdOrCtrl+Q', click: () => app.quit() },
+            ]),
       ],
     },
   ]
@@ -475,10 +495,13 @@ app.on('web-contents-created', (_event, contents) => {
 app.on('ready', () => {
   createApplicationMenu()
   createWindow()
+  createTray()
 })
 
 // Cleanup WebSocket on quit
 app.on('before-quit', () => {
+  isQuitting = true
+  destroyTray()
   cleanupBroadcastWebSocket()
 })
 
