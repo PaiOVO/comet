@@ -10,6 +10,7 @@ import { registerBilibiliIpcHandlers } from './api/bilibili'
 import { cleanupBroadcastWebSocket, initBroadcastWebSocket } from './api/broadcast-websocket'
 import { UPDATE_BASE_URL } from './lib/const'
 import { IpcChannel, IpcEvent } from './lib/ipc'
+import { focusMainWindow } from './tray'
 
 // https://github.com/electron/forge/issues/3439#issuecomment-3197027877
 const __filename = fileURLToPath(import.meta.url)
@@ -33,25 +34,7 @@ if (!isSingleInstance) {
 // Handle when a second instance is launched - focus the existing window (non-macOS only)
 if (process.platform !== 'darwin') {
   app.on('second-instance', () => {
-    const windows = BrowserWindow.getAllWindows()
-    const mainWindow = windows[0]
-
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) {
-        mainWindow.restore()
-      }
-
-      mainWindow.show()
-      mainWindow.focus()
-
-      // On Windows, use setAlwaysOnTop workaround to force window to foreground
-      // Windows has ForegroundLockTimeout that prevents apps from stealing focus
-      if (process.platform === 'win32') {
-        mainWindow.setAlwaysOnTop(true)
-        mainWindow.focus()
-        mainWindow.setAlwaysOnTop(false)
-      }
-    }
+    focusMainWindow()
   })
 }
 
@@ -205,35 +188,9 @@ ipcMain.handle(IpcChannel.SHOW_NOTIFICATION, async (_event, params: ShowNotifica
   notification.on('click', () => {
     console.log('[Notification] Click received, navigating to session:', params.talkerId)
 
-    // Get windows at click time, not at registration time
-    const currentWindows = BrowserWindow.getAllWindows()
-    const mainWindow = currentWindows[0]
+    const mainWindow = focusMainWindow()
 
     if (mainWindow) {
-      // Restore if minimized
-      if (mainWindow.isMinimized()) {
-        mainWindow.restore()
-      }
-
-      // Show and focus the window (show() is more reliable than focus() alone)
-      mainWindow.show()
-      mainWindow.focus()
-
-      // On macOS, bring app to front via dock
-      if (process.platform === 'darwin') {
-        app.dock?.show()
-        app.focus({ steal: true })
-      }
-
-      // On Windows, use setAlwaysOnTop workaround to force window to foreground
-      // Windows has ForegroundLockTimeout that prevents apps from stealing focus
-      if (process.platform === 'win32') {
-        mainWindow.setAlwaysOnTop(true)
-        mainWindow.focus()
-        mainWindow.setAlwaysOnTop(false)
-      }
-
-      // Send event to renderer to navigate to the session
       mainWindow.webContents.send(IpcEvent.BILIBILI_NAVIGATE_TO_SESSION, {
         talkerId: params.talkerId,
         sessionType: params.sessionType,
