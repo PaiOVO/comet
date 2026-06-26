@@ -10,10 +10,16 @@ import { registerBilibiliIpcHandlers } from './api/bilibili'
 import { cleanupBroadcastWebSocket, initBroadcastWebSocket } from './api/broadcast-websocket'
 import { UPDATE_BASE_URL } from './lib/const'
 import { IpcChannel, IpcEvent } from './lib/ipc'
+import { createTray, destroyTray, focusMainWindow, maybeShowTrayHint, updateTrayUnread } from './tray'
 
 // https://github.com/electron/forge/issues/3439#issuecomment-3197027877
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
+
+// Set to true once the user explicitly quits (tray menu, Ctrl+Q, or an update
+// install) so the window 'close' handler stops hiding to the tray and lets the
+// app actually exit.
+let isQuitting = false
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (started) {
@@ -33,25 +39,7 @@ if (!isSingleInstance) {
 // Handle when a second instance is launched - focus the existing window (non-macOS only)
 if (process.platform !== 'darwin') {
   app.on('second-instance', () => {
-    const windows = BrowserWindow.getAllWindows()
-    const mainWindow = windows[0]
-
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) {
-        mainWindow.restore()
-      }
-
-      mainWindow.show()
-      mainWindow.focus()
-
-      // On Windows, use setAlwaysOnTop workaround to force window to foreground
-      // Windows has ForegroundLockTimeout that prevents apps from stealing focus
-      if (process.platform === 'win32') {
-        mainWindow.setAlwaysOnTop(true)
-        mainWindow.focus()
-        mainWindow.setAlwaysOnTop(false)
-      }
-    }
+    focusMainWindow()
   })
 }
 
@@ -205,35 +193,9 @@ ipcMain.handle(IpcChannel.SHOW_NOTIFICATION, async (_event, params: ShowNotifica
   notification.on('click', () => {
     console.log('[Notification] Click received, navigating to session:', params.talkerId)
 
-    // Get windows at click time, not at registration time
-    const currentWindows = BrowserWindow.getAllWindows()
-    const mainWindow = currentWindows[0]
+    const mainWindow = focusMainWindow()
 
     if (mainWindow) {
-      // Restore if minimized
-      if (mainWindow.isMinimized()) {
-        mainWindow.restore()
-      }
-
-      // Show and focus the window (show() is more reliable than focus() alone)
-      mainWindow.show()
-      mainWindow.focus()
-
-      // On macOS, bring app to front via dock
-      if (process.platform === 'darwin') {
-        app.dock?.show()
-        app.focus({ steal: true })
-      }
-
-      // On Windows, use setAlwaysOnTop workaround to force window to foreground
-      // Windows has ForegroundLockTimeout that prevents apps from stealing focus
-      if (process.platform === 'win32') {
-        mainWindow.setAlwaysOnTop(true)
-        mainWindow.focus()
-        mainWindow.setAlwaysOnTop(false)
-      }
-
-      // Send event to renderer to navigate to the session
       mainWindow.webContents.send(IpcEvent.BILIBILI_NAVIGATE_TO_SESSION, {
         talkerId: params.talkerId,
         sessionType: params.sessionType,
@@ -277,8 +239,11 @@ function createBadgeIcon(count: number): Electron.NativeImage {
   return nativeImage.createFromBuffer(Buffer.from(canvas))
 }
 
-// Badge count IPC handler (macOS dock badge / Windows taskbar overlay)
+// Badge count IPC handler (macOS dock badge / Windows taskbar overlay / tray indicator)
 ipcMain.handle(IpcChannel.APP_SET_BADGE_COUNT, (_event, count: number) => {
+  // Reflect unread state on the system tray (Windows/Linux); no-op elsewhere.
+  updateTrayUnread(count)
+
   if (process.platform === 'darwin') {
     // On macOS, setBadge takes a string - empty string clears the badge
     app.dock?.setBadge(count > 0 ? String(count) : '')
@@ -363,6 +328,17 @@ const createWindow = () => {
   if (process.env.NODE_ENV === 'development') {
     mainWindow.webContents.openDevTools()
   }
+
+  // On Windows/Linux, closing the window hides it to the tray instead of
+  // quitting, so the app keeps receiving messages in the background. A real
+  // quit (tray menu / Ctrl+Q / update install) sets isQuitting first.
+  mainWindow.on('close', event => {
+    if (!isQuitting && (process.platform === 'win32' || process.platform === 'linux')) {
+      event.preventDefault()
+      mainWindow.hide()
+      maybeShowTrayHint()
+    }
+  })
 }
 
 // Create application menu
@@ -459,7 +435,11 @@ const createApplicationMenu = () => {
               { type: 'separator' as const },
               { role: 'window' as const },
             ]
-          : [{ role: 'close' as const, label: '关闭' }]),
+          : [
+              { role: 'close' as const, label: '关闭' },
+              { type: 'separator' as const },
+              { label: '退出', accelerator: 'CmdOrCtrl+Q', click: () => app.quit() },
+            ]),
       ],
     },
   ]
@@ -518,16 +498,20 @@ app.on('web-contents-created', (_event, contents) => {
 app.on('ready', () => {
   createApplicationMenu()
   createWindow()
+  createTray()
 })
 
 // Cleanup WebSocket on quit
 app.on('before-quit', () => {
+  isQuitting = true
+  destroyTray()
   cleanupBroadcastWebSocket()
 })
 
 // Quit when all windows are closed, except on macOS. There, it's common
 // for applications and their menu bar to stay active until the user quits
 // explicitly with Cmd + Q.
+// On Windows/Linux the window hides to the tray on close instead of being destroyed, so this normally only fires during an explicit quit.
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()

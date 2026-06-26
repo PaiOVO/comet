@@ -18,6 +18,7 @@
       "!out",
       "!public",
       "!references",
+      "!src/assets/tray-icons.generated.ts",
       "!storybook-static"
     ]
   },
