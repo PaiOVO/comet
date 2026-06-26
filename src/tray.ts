@@ -26,6 +26,8 @@ interface AppPrefsSchema {
 const prefsStore = new Store<AppPrefsSchema>({
   name: 'app-prefs',
   defaults: { hasShownTrayHint: false },
+  // Self-heal a corrupt prefs file (reset to defaults) instead of throwing at startup.
+  clearInvalidConfig: true,
 })
 
 function getIcons(): { normal: NativeImage; unread: NativeImage } {
@@ -115,13 +117,19 @@ export function updateTrayUnread(count: number): void {
  * electron-store so it never repeats.
  */
 export function maybeShowTrayHint(): void {
-  if (prefsStore.get('hasShownTrayHint')) return
-  if (!Notification.isSupported()) return
+  // A best-effort one-time hint must never bubble out of the window 'close'
+  // handler — guard every electron-store read/write (e.g. an unreadable file).
+  try {
+    if (prefsStore.get('hasShownTrayHint')) return
+    if (!Notification.isSupported()) return
 
-  new Notification({
-    title: 'LAPLACE Comet',
-    body: 'LAPLACE Comet 仍在后台运行，可从系统托盘重新打开。',
-  }).show()
+    new Notification({
+      title: 'LAPLACE Comet',
+      body: 'LAPLACE Comet 仍在后台运行，可从系统托盘重新打开。',
+    }).show()
 
-  prefsStore.set('hasShownTrayHint', true)
+    prefsStore.set('hasShownTrayHint', true)
+  } catch (err) {
+    console.error('[Tray] tray hint failed (non-fatal):', err)
+  }
 }
