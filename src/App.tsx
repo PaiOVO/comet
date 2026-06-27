@@ -5,6 +5,7 @@ import { usePrivateMessages } from '@/hooks/usePrivateMessages'
 import { AboutDialog } from '@/components/comet/AboutDialog'
 import { AddAccountDialog } from '@/components/comet/AddAccountDialog'
 import { LoginScreen } from '@/components/comet/LoginScreen'
+import { NewConversationDialog } from '@/components/comet/NewConversationDialog'
 import { MessagesPanel } from '@/components/comet/MessagesPanel'
 import { SessionList } from '@/components/comet/SessionList'
 import { SettingsDialog } from '@/components/comet/SettingsDialog'
@@ -56,6 +57,7 @@ export default function App() {
   } = usePrivateMessages()
 
   const [initialLoading, setInitialLoading] = useState(true)
+  const [isNewConversationOpen, setIsNewConversationOpen] = useState(false)
   const openSettings = useSettings(state => state.openSettings)
   const openAbout = useSettings(state => state.openAbout)
 
@@ -141,6 +143,17 @@ export default function App() {
     await fetchSessions()
   }, [checkLogin, fetchSessions])
 
+  // Handle navigation after sending a message from the new conversation dialog
+  const handleNewConversationNavigate = useCallback(
+    (session: import('@/types/bilibili').BilibiliSession) => {
+      // Refresh sessions to pick up the new one from the server
+      fetchSessions()
+      // Navigate to the session
+      selectSession(session)
+    },
+    [fetchSessions, selectSession]
+  )
+
   // Show loading state while checking initial login
   if (initialLoading) {
     return (
@@ -182,6 +195,7 @@ export default function App() {
               onAddAccount={startAddingAccount}
               onRemoveAccount={removeAccount}
               onReauthAccount={startReauthAccount}
+              onNewConversation={() => setIsNewConversationOpen(true)}
             />
 
             {/* Settings Dialog */}
@@ -222,6 +236,14 @@ export default function App() {
               }}
               onSuccess={reauthAccount ? onReauthSuccess : onAccountAdded}
               reauthAccount={reauthAccount}
+            />
+
+            {/* New Conversation Dialog */}
+            <NewConversationDialog
+              open={isNewConversationOpen}
+              onOpenChange={setIsNewConversationOpen}
+              onSessionNavigate={handleNewConversationNavigate}
+              currentUserMid={userInfo?.mid}
             />
           </>
         )}

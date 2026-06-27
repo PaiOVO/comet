@@ -1,4 +1,4 @@
-import { Loader2, MessageSquare, RefreshCw, Search, Settings, X } from 'lucide-react'
+import { Loader2, MessageSquare, PenSquare, RefreshCw, Search, Settings, X } from 'lucide-react'
 import { forwardRef, useMemo, useState } from 'react'
 import type { ScrollerProps } from 'react-virtuoso'
 import { Virtuoso } from 'react-virtuoso'
@@ -57,6 +57,7 @@ interface SessionListProps {
   onAddAccount?: () => void
   onRemoveAccount?: (mid: number) => void
   onReauthAccount?: (mid: number) => void
+  onNewConversation?: () => void
 }
 
 export function SessionList({
@@ -79,6 +80,7 @@ export function SessionList({
   onAddAccount,
   onRemoveAccount,
   onReauthAccount,
+  onNewConversation,
 }: SessionListProps) {
   const [filterText, setFilterText] = useState('')
   const [visibilityFilter, setVisibilityFilter] = useState<SessionVisibilityFilter>('all')
@@ -158,6 +160,15 @@ export function SessionList({
               )}
             </InputGroupAddon>
           </InputGroup>
+          <Button
+            variant='ghost'
+            size='icon'
+            disabled={!isConnected}
+            onClick={onNewConversation}
+            aria-label='发起新私信'
+          >
+            <PenSquare className='size-4' aria-hidden='true' />
+          </Button>
           <Menu>
             <MenuTrigger
               render={
